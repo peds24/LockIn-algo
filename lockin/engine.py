@@ -50,7 +50,7 @@ def calculate_optimal_thresholds(mu: float, sigma: float, n: int) -> List[float]
 
     thresholds = [0.0] * n
     # Value of continuing after game k = expected outcome of playing on optimally.
-    continuation = mu  # value of the last game, seen from the one before it
+    continuation = float(mu)  # value of the last game, seen from the one before it
     for k in range(n - 2, -1, -1):
         thresholds[k] = continuation
         continuation = _expected_max(mu, sigma, continuation)
