@@ -13,7 +13,27 @@ python -m lockin.cli --league 1419821416949280768 --user peds24 --week 3 # dry r
 ```
 
 For each rostered player: mu/sigma from this season's game log (weeks before the one shown),
-N = the team's games that week, the threshold per game, and LOCK/PASS for games already played.
+scaled by Matchup_Adjustment and Context_Volatility, the threshold per game, and LOCK/PASS for
+games already played.
+
+Nightly review (the games of the last finished day in America/Mexico_City, plus a re-check of
+the day before for revised scores):
+
+```bash
+python -m lockin.nightly --league 1419821416949280768 --user peds24 [--date 2026-11-09]
+```
+
+Rules (details in `lockin/model.py`):
+
+- **Games left:** a game's threshold uses the games the player is still expected to play after it.
+  A scheduled game counts only if Sleeper's projection says he plays (gp=1); without a projection,
+  Out/IR players count as not playing.
+- **Matchup_Adjustment:** half-weight blend of Sleeper's per-game projection with mu, capped at ±15%.
+- **Context_Volatility:** sigma × 1.25 for GTD/DTD/Questionable/Doubtful players, else 1.0.
+- **Substitutions:** mu/sigma belong to the player, so a swap doesn't change them; the incoming
+  player uses his own games left. Players already locked are skipped. A LOCK for a benched player
+  shows as BENCH (it only counts if he's started).
+- **Lock state** is inferred from Sleeper's weekly points (the API has no lock flag): a hint only.
 
 ## Run tests
 
@@ -25,8 +45,10 @@ python -m unittest discover -s tests -v
 
 - `lockin/engine.py`: `calculate_optimal_thresholds`, `apply_modifiers`, `lock_decision` (standard library only)
 - `lockin/sleeper.py`: Sleeper public API client + league scoring (`fantasy_points`, `mu_sigma`)
-- `lockin/cli.py`: weekly thresholds and LOCK/PASS for one roster
-- `tests/`: 10 unit tests (offline)
+- `lockin/model.py`: games-left, modifier, substitution and lock-inference rules (pure)
+- `lockin/report.py`: one roster × one week → thresholds and calls
+- `lockin/cli.py`: weekly view · `lockin/nightly.py`: nightly LOCK/PASS review
+- `tests/`: 18 unit tests (offline)
 
 ## Status
 
@@ -34,7 +56,8 @@ python -m unittest discover -s tests -v
 - [x] UAT decided: keep the pseudocode values, 40.04 / 38.19 / 35.0 / 0 (mu=35, sigma=8, N=4)
 - [x] Sleeper connection: league `1419821416949280768` (Bowl Nowheres, lock-in mode). Endpoints verified; scoring reproduces Sleeper's weekly points exactly
 - [x] mu/sigma: this season's game log (default; min 3 games)
-- [ ] Matchup_Adjustment / Context_Volatility source (both 1.0 for now)
-- [ ] Missed games (DNP/injury): rerun with N = games actually left
-- [ ] Substitutions: N = scheduled games left; rerun on each swap; benched-player and mu rules
-- [ ] Nightly review (America/Mexico_City): pull final scores → LOCK/PASS → notify (Todoist / push / email)
+- [x] Matchup_Adjustment (Sleeper projections) and Context_Volatility (injury status)
+- [x] Missed games: games left = games he's projected to play
+- [x] Substitution rules
+- [x] Nightly review script
+- [ ] Nightly schedule + notification channel

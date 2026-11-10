@@ -10,6 +10,9 @@ Endpoints verified against a live league on 2026-11-10:
     v1/players/nba                        all players (~2.5 MB, cached daily)
     schedule/nba/regular/<season>         every game: date, week, home/away team
     stats/nba/player/<pid>?...&grouping=week   a player's game log by week
+    projections/nba/<season>/<week>?season_type=regular
+                                          per-game projections: gp (1 = expected to
+                                          play, missing = not), projected stat line
 
 Standard library only.
 """
@@ -76,6 +79,7 @@ class Sleeper:
         self.season: str = self.league["season"]
         self._players: Optional[dict] = None
         self._schedule: Optional[list] = None
+        self._projections: Dict[int, Dict[str, Dict[str, dict]]] = {}
 
     # league
     def state(self) -> dict:
@@ -115,6 +119,24 @@ class Sleeper:
 
     def team(self, pid: str) -> Optional[str]:
         return self.players().get(pid, {}).get("team")
+
+    def injury_status(self, pid: str) -> Optional[str]:
+        return self.players().get(pid, {}).get("injury_status")
+
+    # projections
+    def projections(self, week: int) -> Dict[str, Dict[str, dict]]:
+        """{player_id: {date: {"plays": bool, "points": float | None}}}."""
+        if week not in self._projections:
+            out: Dict[str, Dict[str, dict]] = {}
+            for e in _get(f"projections/nba/{self.season}/{week}?season_type=regular") or []:
+                st = e.get("stats") or {}
+                plays = bool(st.get("gp"))
+                out.setdefault(e["player_id"], {})[e["date"]] = {
+                    "plays": plays,
+                    "points": fantasy_points(st, self.scoring) if plays else None,
+                }
+            self._projections[week] = out
+        return self._projections[week]
 
     # schedule
     def schedule(self) -> list:
