@@ -33,7 +33,13 @@ Rules (details in `lockin/model.py`):
 - **Substitutions:** mu/sigma belong to the player, so a swap doesn't change them; the incoming
   player uses his own games left. Players already locked are skipped. A LOCK for a benched player
   shows as BENCH (it only counts if he's started).
-- **Lock state** is inferred from Sleeper's weekly points (the API has no lock flag): a hint only.
+- **Remembered locks:** Sleeper's API has no lock flag, so every LOCK call is stored once as a
+  Todoist subtask whose description holds a marker line (`lockin pid=... date=... score=...`) and is
+  never recomputed. Pass this week's markers with `--locks FILE` (append ` confirmed` for ticked
+  subtasks); `--json-out FILE` writes the new calls with their markers.
+- **Verification:** after the player's next game, Sleeper's weekly points show whether the lock was
+  made (they stay at the locked score). A lock Sleeper contradicts is flagged `!!` and the player is
+  evaluated again. Locks made without a call are inferred from the same points, as a hint only.
 
 ## Run tests
 
@@ -48,7 +54,7 @@ python -m unittest discover -s tests -v
 - `lockin/model.py`: games-left, modifier, substitution and lock-inference rules (pure)
 - `lockin/report.py`: one roster × one week → thresholds and calls
 - `lockin/cli.py`: weekly view · `lockin/nightly.py`: nightly LOCK/PASS review
-- `tests/`: 18 unit tests (offline)
+- `tests/`: 20 unit tests (offline)
 
 ## Status
 
@@ -60,4 +66,5 @@ python -m unittest discover -s tests -v
 - [x] Missed games: games left = games he's projected to play
 - [x] Substitution rules
 - [x] Nightly review script
-- [ ] Nightly schedule + notification channel
+- [x] Nightly schedule (cloud, 1:10am America/Mexico_City) → Todoist project Lock-In
+- [x] Remembered locks + Sleeper verification

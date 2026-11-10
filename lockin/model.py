@@ -22,6 +22,8 @@ Decisions (recorded in the project doc):
 
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .engine import calculate_optimal_thresholds
@@ -79,3 +81,58 @@ def locked_date(played: Sequence[Tuple[str, float]], week_points: Optional[float
         if abs(pts - week_points) < 0.01:
             return date
     return None
+
+
+# --- Remembered locks --------------------------------------------------------
+#
+# Every LOCK call is written once, as a Todoist subtask whose description holds
+# a marker line, and is never recomputed:
+#
+#     lockin pid=4866 date=2026-11-09 score=45.0
+#
+# A ticked subtask means "I locked it in Sleeper": the line gets " confirmed".
+# Sleeper can verify a lock only after the player's next game: a locked
+# player's weekly points stay at the locked score, an unlocked one's move to
+# the newest game.
+
+_MARKER = re.compile(r"lockin\s+pid=(\S+)\s+date=(\d{4}-\d{2}-\d{2})\s+score=(-?[\d.]+)(.*)")
+
+VERIFIED = "verified"    # Sleeper's points stayed at the locked score
+MISSED = "missed"        # Sleeper's points moved on: the lock was not made
+UNVERIFIED = "awaiting"  # no later game yet, so Sleeper can't tell
+
+
+@dataclass(frozen=True)
+class KnownLock:
+    pid: str
+    date: str
+    score: float
+    confirmed: bool = False
+
+
+def lock_marker(pid: str, date: str, score: float) -> str:
+    return f"lockin pid={pid} date={date} score={score:.1f}"
+
+
+def parse_locks(text: str) -> Dict[str, KnownLock]:
+    """Read marker lines (any surrounding text is ignored). Last line per player wins,
+    except that a confirmed line is never downgraded by an unconfirmed duplicate."""
+    out: Dict[str, KnownLock] = {}
+    for m in _MARKER.finditer(text):
+        pid, date, score, rest = m.groups()
+        lock = KnownLock(pid, date, float(score), "confirmed" in rest.split("\n")[0])
+        prev = out.get(pid)
+        if prev and prev.date == date and prev.confirmed and not lock.confirmed:
+            continue
+        out[pid] = lock
+    return out
+
+
+def verify_lock(lock: KnownLock, played: Sequence[Tuple[str, float]],
+                week_points: Optional[float]) -> str:
+    later = [p for d, p in played if d > lock.date]
+    if not later or week_points is None:
+        return UNVERIFIED
+    if abs(week_points - lock.score) < 0.01:
+        return VERIFIED
+    return MISSED

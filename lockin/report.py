@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from .engine import LOCK, apply_modifiers, lock_decision
 from .model import (
+    MISSED,
+    KnownLock,
     context_volatility,
     expected_games,
     locked_date,
     matchup_adjustment,
     threshold_for,
+    verify_lock,
 )
 from .sleeper import Sleeper, mu_sigma
 
@@ -41,10 +44,14 @@ class PlayerReport:
     matchup_adj: float = 1.0
     volatility: float = 1.0
     sleeper_locked_on: Optional[str] = None
+    lock: Optional[KnownLock] = None   # remembered LOCK call this week
+    lock_status: str = ""              # verified / missed / awaiting
+    week_points: Optional[float] = None
     games: List[GameRow] = field(default_factory=list)
 
 
-def week_report(s: Sleeper, user: str, week: int) -> List[PlayerReport]:
+def week_report(s: Sleeper, user: str, week: int,
+                known: Optional[Dict[str, KnownLock]] = None) -> List[PlayerReport]:
     roster = s.roster_for(user)
     matchup = next((m for m in s.matchups(week) if m["roster_id"] == roster["roster_id"]), {})
     starters = set(matchup.get("starters") or roster.get("starters") or [])
@@ -69,7 +76,16 @@ def week_report(s: Sleeper, user: str, week: int) -> List[PlayerReport]:
 
         played = [(g.date, g.points) for g in log if g.week == week]
         scores = dict(played)
-        r.sleeper_locked_on = locked_date(played, week_points.get(pid))
+        r.week_points = week_points.get(pid)
+        dates_this_week = {g["date"] for g in sched}
+        lock = (known or {}).get(pid)
+        if lock and lock.date in dates_this_week:
+            r.lock = lock
+            r.lock_status = verify_lock(lock, played, r.week_points)
+        else:
+            lock = None
+            r.sleeper_locked_on = locked_date(played, r.week_points)
+        holds = lock is not None and r.lock_status != MISSED
 
         p = proj.get(pid, {})
         dates = [g["date"] for g in sched]
@@ -86,7 +102,13 @@ def week_report(s: Sleeper, user: str, week: int) -> List[PlayerReport]:
             d = g["date"]
             t = threshold_for(r.mu, r.sigma, sum(1 for e in expected if e > d))
             score = scores.get(d)
-            if locked:
+            if lock and d < lock.date:
+                # Before a remembered lock: frozen as the PASS it was at the time.
+                call = "PASS" if score is not None else ("DNP" if g["status"] == "complete" else "out")
+            elif lock and d == lock.date:
+                call = LOCK if holds else MISSED
+                locked = holds
+            elif locked:
                 call = "-"
             elif score is not None:
                 call = lock_decision(score, t)
@@ -112,7 +134,9 @@ def format_week(reports: List[PlayerReport]) -> str:
             continue
         head += (f"  mu={r.mu:.1f} sigma={r.sigma:.1f}"
                  f"  (matchup x{r.matchup_adj:.2f}, volatility x{r.volatility:.2f})")
-        if r.sleeper_locked_on:
+        if r.lock:
+            head += f"  · remembered lock {r.lock.date} ({r.lock_status})"
+        elif r.sleeper_locked_on:
             head += f"  · Sleeper: locked {r.sleeper_locked_on}"
         lines.append(head)
         for i, g in enumerate(r.games, 1):

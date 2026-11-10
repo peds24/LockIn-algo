@@ -68,3 +68,25 @@ class NightlyDateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RememberedLockTests(unittest.TestCase):
+    def test_parse_markers(self):
+        from lockin.model import KnownLock, lock_marker, parse_locks
+        text = ("Lock Cooper Flagg (45.0)\n" + lock_marker("4866", "2026-11-09", 45.0) + "\n"
+                "something else\nlockin pid=4891 date=2026-11-09 score=30.5 confirmed\n")
+        self.assertEqual(parse_locks(text), {
+            "4866": KnownLock("4866", "2026-11-09", 45.0, False),
+            "4891": KnownLock("4891", "2026-11-09", 30.5, True),
+        })
+        # A confirmed line is not downgraded by an unconfirmed copy of it.
+        dup = "lockin pid=1 date=2026-11-09 score=3.0 confirmed\nlockin pid=1 date=2026-11-09 score=3.0\n"
+        self.assertTrue(parse_locks(dup)["1"].confirmed)
+
+    def test_verify(self):
+        from lockin.model import MISSED, UNVERIFIED, VERIFIED, KnownLock, verify_lock
+        lock = KnownLock("1", "2026-11-09", 45.0)
+        self.assertEqual(verify_lock(lock, [("2026-11-09", 45.0)], 45.0), UNVERIFIED)
+        played = [("2026-11-09", 45.0), ("2026-11-12", 22.0)]
+        self.assertEqual(verify_lock(lock, played, 45.0), VERIFIED)
+        self.assertEqual(verify_lock(lock, played, 22.0), MISSED)
