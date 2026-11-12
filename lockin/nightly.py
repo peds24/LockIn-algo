@@ -23,11 +23,12 @@ import datetime as dt
 import json
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence, Tuple
 from zoneinfo import ZoneInfo
 
 from .engine import LOCK
-from .model import BENCHED, MISSED, VERIFIED, KnownLock, lock_marker, parse_locks
+from .model import (BENCHED, MISSED, VERIFIED, KnownLock, lock_marker, parse_locks, plan_swaps,
+                    rest_of_week_value)
 from .report import PlayerReport, week_report
 from .sleeper import Sleeper
 
@@ -44,7 +45,35 @@ def week_of(s: Sleeper, date: str) -> Optional[int]:
     return next((g["week"] for g in s.schedule() if g["date"] == date), None)
 
 
-def day_lines(reports: List[PlayerReport], date: str) -> List[str]:
+def _locked(r: PlayerReport, date: str) -> bool:
+    if r.sleeper_locked_on and r.sleeper_locked_on <= date:
+        return True
+    return any(g.call == "LOCK" and g.date <= date for g in r.games)
+
+
+def _value(r: PlayerReport, date: str) -> Optional[float]:
+    """Expected rest-of-week score after `date`; None when there's no model for him."""
+    left = sum(1 for g in r.games if g.expected and g.date > date)
+    if r.note and r.note != "no games this week":
+        return 0.0 if r.injury in ("Out", "IR") else None
+    current = next((g.score for g in reversed(r.games) if g.date <= date and g.score is not None), 0.0)
+    return rest_of_week_value(r.mu, r.sigma, left, current)
+
+
+def swaps(reports: List[PlayerReport], date: str, slots: Sequence[str]) -> Dict[str, Tuple[Optional[str], Optional[float]]]:
+    """Bench player pid -> (starter pid to bench for him or None, that starter's value)."""
+    starters = {r.pid: (r.positions, _value(r, date), _locked(r, date)) for r in reports if r.starter}
+    bench = {}
+    for r in reports:
+        v = _value(r, date)
+        if not r.starter and v is not None and any(g.expected and g.date > date for g in r.games):
+            bench[r.pid] = (r.positions, v)
+    return plan_swaps(slots, starters, bench)
+
+
+def day_lines(reports: List[PlayerReport], date: str, slots: Sequence[str] = ()) -> List[str]:
+    plan = swaps(reports, date, slots) if slots else {}
+    names = {r.pid: r.name for r in reports}
     lines = []
     for r in reports:
         g = next((g for g in r.games if g.date == date), None)
@@ -62,8 +91,17 @@ def day_lines(reports: List[PlayerReport], date: str) -> List[str]:
             lines.append(f"  -       {who}: no score yet ({g.call})")
         elif g.call == BENCHED:
             nxt = next((x for x in r.games if x.date > date and x.expected), None)
-            tip = (f"start him for {nxt.date} (threshold {nxt.threshold:.1f})" if nxt
-                   else "no games left this week")
+            out, out_val = plan.get(r.pid, (None, None))
+            mine = _value(r, date)
+            if not nxt:
+                tip = "no games left this week"
+            elif out:
+                tip = (f"start him for {nxt.date}, bench {names[out]}"
+                       f" (rest of week ~{mine:.1f} vs ~{out_val:.1f})")
+            elif out_val is not None:
+                tip = f"keep him benched (~{mine:.1f}, your weakest swappable starter is ~{out_val:.1f})"
+            else:
+                tip = "keep him benched (no unlocked starter he can replace)"
             lines.append(f"  {BENCHED:<7} {who}: {g.score:.1f} on the bench, can't be locked"
                          f" · {tip}")
         else:
@@ -125,10 +163,11 @@ def main(argv=None) -> int:
     print(f"Lock-In · {s.league['name']} · games of {date}")
     week = week_of(s, date)
     reports = week_report(s, a.user, week, known) if week is not None else []
+    slots = [p for p in s.league.get("roster_positions", []) if p not in ("BN", "IR")]
     if week is None:
         print(f"No NBA games on {date}.")
     else:
-        print("\n".join(day_lines(reports, date)) or f"None of your players played on {date}.")
+        print("\n".join(day_lines(reports, date, slots)) or f"None of your players played on {date}.")
         locks = lock_lines(reports)
         if locks:
             print("\nLocks this week:")
@@ -140,7 +179,7 @@ def main(argv=None) -> int:
         print(f"No NBA games on {prev}.")
     else:
         preports = reports if pweek == week else week_report(s, a.user, pweek, known)
-        print("\n".join(day_lines(preports, prev)) or f"None of your players played on {prev}.")
+        print("\n".join(day_lines(preports, prev, slots)) or f"None of your players played on {prev}.")
 
     if a.json_out:
         a.json_out.write_text(json.dumps(new_calls(reports, date), indent=2))

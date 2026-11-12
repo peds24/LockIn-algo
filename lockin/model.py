@@ -16,15 +16,26 @@ Decisions (recorded in the project doc):
   (minutes are uncertain), else 1.0.
 - Substitutions: mu and sigma belong to the player, not the lineup slot, so a
   swap never changes them. The incoming player gets his own games left. A
-  player already locked is skipped. A LOCK call for a benched player is shown
-  as BENCH: it only scores if he is in a starting slot.
+  player already locked is skipped.
+- Bench games can't be locked: a game played while the player sits on the
+  bench is gone. Moving him into the lineup afterwards does not let you lock
+  it; he can only be started and judged on his NEXT game. So a benched game is
+  called BENCHED (never LOCK), it does not end his week, and his later games
+  keep their normal thresholds.
+- Who to bench: a benched player worth starting replaces the starter with the
+  lowest rest-of-week value whose slot he can fill (the lineup is re-checked
+  against the league's slots, so others may move into UTIL/G/F). Value with
+  n expected games left is the optimal-stopping continuation value (mu for 1
+  game, E[max(X, value of n-1)] for more); with none left it is the score he
+  already has. Locked starters are never benched. The swap is suggested only
+  if it raises the expected value.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from .engine import calculate_optimal_thresholds, lock_decision
 
@@ -145,3 +156,78 @@ def game_call(score: float, threshold: float, starter: bool) -> str:
     A bench game can't be locked later by starting him, so it is never LOCK.
     """
     return lock_decision(score, threshold) if starter else BENCHED
+
+
+# --- Who to bench -------------------------------------------------------------
+
+FLEX_SLOTS = {"G": {"PG", "SG"}, "F": {"SF", "PF"}}
+
+
+def fits(slot: str, positions: Iterable[str]) -> bool:
+    if slot == "UTIL":
+        return True
+    return bool(set(positions) & FLEX_SLOTS.get(slot, {slot}))
+
+
+def lineup_fits(slots: Sequence[str], lineup: Sequence[Sequence[str]]) -> bool:
+    """Can these players (each a list of positions) fill these slots, one each?"""
+    if len(lineup) > len(slots):
+        return False
+
+    def place(i: int, free: List[bool]) -> bool:
+        if i == len(lineup):
+            return True
+        for j, slot in enumerate(slots):
+            if free[j] and fits(slot, lineup[i]):
+                free[j] = False
+                if place(i + 1, free):
+                    return True
+                free[j] = True
+        return False
+
+    # Most constrained players first keeps the search tiny.
+    lineup = sorted(lineup, key=lambda ps: sum(fits(s, ps) for s in slots))
+    return place(0, [True] * len(slots))
+
+
+def rest_of_week_value(mu: float, sigma: float, games_left: int, current: float) -> float:
+    """Expected final score from here, playing the remaining games optimally."""
+    return threshold_for(mu, sigma, games_left) if games_left > 0 else current
+
+
+def plan_swaps(
+    slots: Sequence[str],
+    starters: Dict[str, Tuple[Sequence[str], Optional[float], bool]],
+    bench: Dict[str, Tuple[Sequence[str], float]],
+) -> Dict[str, Tuple[Optional[str], Optional[float]]]:
+    """For each bench player, the starter to bench for him (or None to keep him out).
+
+    starters: pid -> (positions, value or None if unknown, locked)
+    bench:    pid -> (positions, value)
+    Returns pid -> (starter to bench, that starter's value). When no swap helps,
+    the starter is None and the value is the weakest swappable starter's (None
+    if nobody can be swapped). Best bench players claim starters first.
+    """
+    lineup = {pid: list(ps) for pid, (ps, _, _) in starters.items()}
+    taken: Set[str] = set()
+    out: Dict[str, Tuple[Optional[str], Optional[float]]] = {}
+    for b, (b_pos, b_val) in sorted(bench.items(), key=lambda kv: -kv[1][1]):
+        options = []
+        for s, (_, s_val, locked) in starters.items():
+            if locked or s_val is None or s in taken:
+                continue
+            trial = [ps for pid, ps in lineup.items() if pid != s] + [list(b_pos)]
+            if lineup_fits(slots, trial):
+                options.append((s_val, s))
+        if not options:
+            out[b] = (None, None)
+            continue
+        s_val, s = min(options)
+        if b_val > s_val:
+            taken.add(s)
+            del lineup[s]
+            lineup[b] = list(b_pos)
+            out[b] = (s, s_val)
+        else:
+            out[b] = (None, s_val)
+    return out

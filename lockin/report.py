@@ -39,6 +39,7 @@ class PlayerReport:
     team: Optional[str]
     starter: bool
     injury: Optional[str]
+    positions: List[str] = field(default_factory=list)
     note: str = ""
     mu: float = 0.0
     sigma: float = 0.0
@@ -62,7 +63,8 @@ def week_report(s: Sleeper, user: str, week: int,
     reports = []
     for pid in sorted(roster["players"], key=lambda p: (p not in starters, s.name(p))):
         team, injury = s.team(pid), s.injury_status(pid)
-        r = PlayerReport(pid, s.name(pid), team, pid in starters, injury)
+        r = PlayerReport(pid, s.name(pid), team, pid in starters, injury,
+                         s.players().get(pid, {}).get("fantasy_positions") or [])
         reports.append(r)
 
         sched = s.team_games(team, week) if team else []

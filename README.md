@@ -34,8 +34,12 @@ Rules (details in `lockin/model.py`):
   player uses his own games left. Players already locked are skipped.
 - **Bench games can't be locked:** a game he plays on the bench shows as BENCHED. Starting him
   afterwards doesn't let you lock it; he can only be started for his next game, so his week stays
-  open and later games keep their normal thresholds. The nightly review says which game to start
-  him for. Starter/bench comes from the current lineup (Sleeper keeps no per-day lineup history).
+  open and later games keep their normal thresholds.
+- **Who to bench:** for each benched player who played, the nightly review compares his expected
+  rest-of-week score with your unlocked starters' and names the starter to bench for him (one whose
+  slot he can fill, with the lineup re-checked against PG/SG/G/SF/PF/F/C/UTIL), or says to keep him
+  benched. Locked starters are never benched. Starter/bench comes from the current lineup (Sleeper
+  keeps no per-day lineup history).
 - **Remembered locks:** Sleeper's API has no lock flag, so every LOCK call is stored once as a
   Todoist subtask whose description holds a marker line (`lockin pid=... date=... score=...`) and is
   never recomputed. Pass this week's markers with `--locks FILE` (append ` confirmed` for ticked
@@ -54,10 +58,10 @@ python -m unittest discover -s tests -v
 
 - `lockin/engine.py`: `calculate_optimal_thresholds`, `apply_modifiers`, `lock_decision` (standard library only)
 - `lockin/sleeper.py`: Sleeper public API client + league scoring (`fantasy_points`, `mu_sigma`)
-- `lockin/model.py`: games-left, modifier, substitution and lock-inference rules (pure)
+- `lockin/model.py`: games-left, modifier, substitution, who-to-bench and lock-inference rules (pure)
 - `lockin/report.py`: one roster × one week → thresholds and calls
 - `lockin/cli.py`: weekly view · `lockin/nightly.py`: nightly LOCK/PASS review
-- `tests/`: 21 unit tests (offline)
+- `tests/`: 25 unit tests (offline)
 
 ## Status
 

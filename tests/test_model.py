@@ -5,6 +5,10 @@ from lockin.engine import calculate_optimal_thresholds
 from lockin.model import (
     BENCHED,
     game_call,
+    fits,
+    lineup_fits,
+    plan_swaps,
+    rest_of_week_value,
     context_volatility,
     expected_games,
     locked_date,
@@ -44,6 +48,42 @@ class BenchTests(unittest.TestCase):
         # Even a monster game on the bench can't be locked by starting him later.
         self.assertEqual(game_call(50.0, 30.0, starter=False), BENCHED)
         self.assertEqual(game_call(50.0, 0.0, starter=False), BENCHED)
+
+
+SLOTS = ["PG", "SG", "G", "SF", "PF", "F", "C", "UTIL", "UTIL"]
+GUARD, WING, BIG = ["PG", "SG"], ["SF", "PF"], ["C"]
+
+
+class WhoToBenchTests(unittest.TestCase):
+    def test_slot_fit(self):
+        self.assertTrue(fits("G", ["SG"]))
+        self.assertFalse(fits("F", ["C"]))
+        self.assertTrue(fits("UTIL", ["C"]))
+        self.assertTrue(lineup_fits(SLOTS, [GUARD] * 3 + [WING] * 3 + [BIG] * 3))
+        self.assertFalse(lineup_fits(SLOTS, [BIG] * 4 + [GUARD] * 5))  # only C + 2 UTIL take bigs
+
+    def test_value(self):
+        self.assertEqual(rest_of_week_value(30, 8, 0, 22.0), 22.0)  # done: keeps his score
+        self.assertEqual(rest_of_week_value(30, 8, 1, 22.0), 30)    # one game: mu
+        self.assertGreater(rest_of_week_value(30, 8, 2, 0), 30)     # more games, more upside
+
+    def test_benches_weakest_unlocked_starter_he_can_replace(self):
+        starters = {
+            "g1": (GUARD, 15.0, True),   # weakest, but locked
+            "g2": (GUARD, 18.0, False),
+            "g3": (GUARD, 25.0, False),
+            "w1": (WING, 22.0, False), "w2": (WING, 23.0, False), "w3": (WING, 24.0, False),
+            "c1": (BIG, 16.0, False), "c2": (BIG, 26.0, False), "c3": (BIG, 27.0, False),
+        }
+        # A wing can replace the 16 center: the other bigs take C + UTIL, he takes UTIL...
+        self.assertEqual(plan_swaps(SLOTS, starters, {"b": (WING, 20.0)}), {"b": ("c1", 16.0)})
+        # ...and a weak bench player stays out.
+        self.assertEqual(plan_swaps(SLOTS, starters, {"b": (WING, 10.0)}), {"b": (None, 16.0)})
+
+    def test_two_bench_players_dont_share_a_starter(self):
+        starters = {"s1": (GUARD, 10.0, False), "s2": (GUARD, 12.0, False)}
+        plan = plan_swaps(["UTIL", "UTIL"], starters, {"a": (GUARD, 20.0), "b": (GUARD, 11.0)})
+        self.assertEqual(plan, {"a": ("s1", 10.0), "b": (None, 12.0)})
 
 
 class ModifierTests(unittest.TestCase):
