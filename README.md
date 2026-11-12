@@ -38,7 +38,8 @@ Rules (details in `lockin/model.py`):
 - **Who to bench:** for each benched player who played, the nightly review compares his expected
   rest-of-week score with your unlocked starters' and names the starter to bench for him (one whose
   slot he can fill, with the lineup re-checked against PG/SG/G/SF/PF/F/C/UTIL), or says to keep him
-  benched. Locked starters are never benched. Starter/bench comes from the current lineup (Sleeper
+  benched. Locked starters are never benched. `--swaps-out FILE` writes the recommended swaps as
+  JSON (the nightly routine turns each into a Todoist subtask). Starter/bench comes from the current lineup (Sleeper
   keeps no per-day lineup history).
 - **Remembered locks:** Sleeper's API has no lock flag, so every LOCK call is stored once as a
   Todoist subtask whose description holds a marker line (`lockin pid=... date=... score=...`) and is

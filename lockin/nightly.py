@@ -1,7 +1,8 @@
 """Nightly review: LOCK or PASS for every rostered player who played that day.
 
     python -m lockin.nightly --league 1419821416949280768 --user peds24 \\
-        [--date 2026-11-09] [--locks locks.txt] [--json-out new_locks.json]
+        [--date 2026-11-09] [--locks locks.txt] [--json-out new_locks.json] \\
+        [--swaps-out swaps.json]
 
 Without --date it reviews the most recent NBA day that has finished in
 America/Mexico_City: before noon that is yesterday, from noon on it is today.
@@ -14,6 +15,10 @@ player has played again.
 
 --json-out: writes the NEW LOCK calls for the reviewed date, each with the
 marker line to store, so the caller can remember them.
+
+--swaps-out: writes the recommended lineup swaps for the reviewed date: each
+benched player who played that day and is worth starting, with the starter to
+bench for him and the game to start him for.
 """
 
 from __future__ import annotations
@@ -146,6 +151,26 @@ def new_calls(reports: List[PlayerReport], date: str) -> List[dict]:
     return calls
 
 
+def new_swaps(reports: List[PlayerReport], date: str, slots: Sequence[str]) -> List[dict]:
+    plan = swaps(reports, date, slots)
+    by_pid = {r.pid: r for r in reports}
+    out = []
+    for r in reports:
+        g = next((g for g in r.games if g.date == date), None)
+        if g is None or g.call != BENCHED:
+            continue
+        sit, sit_val = plan.get(r.pid, (None, None))
+        nxt = next((x for x in r.games if x.date > date and x.expected), None)
+        if not sit or not nxt:
+            continue
+        out.append({
+            "start_pid": r.pid, "start_name": r.name, "start_for": nxt.date,
+            "start_value": round(_value(r, date), 1),
+            "bench_pid": sit, "bench_name": by_pid[sit].name, "bench_value": round(sit_val, 1),
+        })
+    return out
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--league", required=True)
@@ -153,6 +178,7 @@ def main(argv=None) -> int:
     ap.add_argument("--date", help="YYYY-MM-DD (game date); default: last finished day")
     ap.add_argument("--locks", type=Path, help="file with remembered lock marker lines")
     ap.add_argument("--json-out", type=Path, help="write new LOCK calls here")
+    ap.add_argument("--swaps-out", type=Path, help="write recommended lineup swaps here")
     a = ap.parse_args(argv)
 
     known: Dict[str, KnownLock] = parse_locks(a.locks.read_text()) if a.locks else {}
@@ -183,6 +209,8 @@ def main(argv=None) -> int:
 
     if a.json_out:
         a.json_out.write_text(json.dumps(new_calls(reports, date), indent=2))
+    if a.swaps_out:
+        a.swaps_out.write_text(json.dumps(new_swaps(reports, date, slots) if week is not None else [], indent=2))
     return 0
 
 
