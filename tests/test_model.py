@@ -3,6 +3,8 @@ import unittest
 
 from lockin.engine import calculate_optimal_thresholds
 from lockin.model import (
+    BENCHED,
+    game_call,
     context_volatility,
     expected_games,
     locked_date,
@@ -33,6 +35,15 @@ class ThresholdTests(unittest.TestCase):
         self.assertAlmostEqual(threshold_for(35, 8, 3), full[0])
         self.assertAlmostEqual(threshold_for(35, 8, 2), full[1])
         self.assertEqual(threshold_for(35, 8, 0), 0.0)
+
+
+class BenchTests(unittest.TestCase):
+    def test_bench_game_never_locks(self):
+        self.assertEqual(game_call(50.0, 30.0, starter=True), "LOCK")
+        self.assertEqual(game_call(20.0, 30.0, starter=True), "PASS")
+        # Even a monster game on the bench can't be locked by starting him later.
+        self.assertEqual(game_call(50.0, 30.0, starter=False), BENCHED)
+        self.assertEqual(game_call(50.0, 0.0, starter=False), BENCHED)
 
 
 class ModifierTests(unittest.TestCase):

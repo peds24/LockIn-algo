@@ -5,10 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from .engine import LOCK, apply_modifiers, lock_decision
+from .engine import LOCK, apply_modifiers
 from .model import (
     MISSED,
     KnownLock,
+    BENCHED,
+    game_call,
     context_volatility,
     expected_games,
     locked_date,
@@ -19,7 +21,6 @@ from .model import (
 from .sleeper import Sleeper, mu_sigma
 
 MIN_GAMES = 3
-BENCH = "BENCH"  # would LOCK, but he is not in a starting slot
 
 
 @dataclass
@@ -28,7 +29,7 @@ class GameRow:
     expected: bool
     threshold: float
     score: Optional[float]
-    call: str  # LOCK, PASS, BENCH, pending, out, DNP, "-" (already locked)
+    call: str  # LOCK, PASS, BENCHED, pending, out, DNP, "-" (already locked)
 
 
 @dataclass
@@ -111,10 +112,8 @@ def week_report(s: Sleeper, user: str, week: int,
             elif locked:
                 call = "-"
             elif score is not None:
-                call = lock_decision(score, t)
+                call = game_call(score, t, r.starter)
                 locked = call == LOCK
-                if locked and not r.starter:
-                    call = BENCH
             elif g["status"] == "complete":
                 call = "DNP"
             else:

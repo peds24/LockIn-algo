@@ -31,8 +31,11 @@ Rules (details in `lockin/model.py`):
 - **Matchup_Adjustment:** half-weight blend of Sleeper's per-game projection with mu, capped at ±15%.
 - **Context_Volatility:** sigma × 1.25 for GTD/DTD/Questionable/Doubtful players, else 1.0.
 - **Substitutions:** mu/sigma belong to the player, so a swap doesn't change them; the incoming
-  player uses his own games left. Players already locked are skipped. A LOCK for a benched player
-  shows as BENCH (it only counts if he's started).
+  player uses his own games left. Players already locked are skipped.
+- **Bench games can't be locked:** a game he plays on the bench shows as BENCHED. Starting him
+  afterwards doesn't let you lock it; he can only be started for his next game, so his week stays
+  open and later games keep their normal thresholds. The nightly review says which game to start
+  him for. Starter/bench comes from the current lineup (Sleeper keeps no per-day lineup history).
 - **Remembered locks:** Sleeper's API has no lock flag, so every LOCK call is stored once as a
   Todoist subtask whose description holds a marker line (`lockin pid=... date=... score=...`) and is
   never recomputed. Pass this week's markers with `--locks FILE` (append ` confirmed` for ticked
@@ -54,7 +57,7 @@ python -m unittest discover -s tests -v
 - `lockin/model.py`: games-left, modifier, substitution and lock-inference rules (pure)
 - `lockin/report.py`: one roster × one week → thresholds and calls
 - `lockin/cli.py`: weekly view · `lockin/nightly.py`: nightly LOCK/PASS review
-- `tests/`: 20 unit tests (offline)
+- `tests/`: 21 unit tests (offline)
 
 ## Status
 

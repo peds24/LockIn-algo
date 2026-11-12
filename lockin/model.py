@@ -26,13 +26,14 @@ import re
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
-from .engine import calculate_optimal_thresholds
+from .engine import calculate_optimal_thresholds, lock_decision
 
 OUT_STATUSES = {"Out", "IR", "Sus", "Suspension", "NA"}
 SHAKY_STATUSES = {"GTD", "DTD", "Questionable", "Doubtful"}
 MATCHUP_BOUNDS = (0.85, 1.15)
 PROJECTION_WEIGHT = 0.5
 SHAKY_VOLATILITY = 1.25
+BENCHED = "BENCHED"  # played on the bench: can't be locked, ever
 
 
 def expected_games(
@@ -136,3 +137,11 @@ def verify_lock(lock: KnownLock, played: Sequence[Tuple[str, float]],
     if abs(week_points - lock.score) < 0.01:
         return VERIFIED
     return MISSED
+
+
+def game_call(score: float, threshold: float, starter: bool) -> str:
+    """LOCK/PASS for a game a starter played; BENCHED if he was on the bench.
+
+    A bench game can't be locked later by starting him, so it is never LOCK.
+    """
+    return lock_decision(score, threshold) if starter else BENCHED

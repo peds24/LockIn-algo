@@ -12,7 +12,7 @@ each (`lockin pid=... date=... score=...`, plus ` confirmed` when you ticked it
 off). These calls are never recomputed. Each is checked against Sleeper once the
 player has played again.
 
---json-out: writes the NEW LOCK/BENCH calls for the reviewed date, each with the
+--json-out: writes the NEW LOCK calls for the reviewed date, each with the
 marker line to store, so the caller can remember them.
 """
 
@@ -27,8 +27,8 @@ from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 from .engine import LOCK
-from .model import MISSED, VERIFIED, KnownLock, lock_marker, parse_locks
-from .report import BENCH, PlayerReport, week_report
+from .model import BENCHED, MISSED, VERIFIED, KnownLock, lock_marker, parse_locks
+from .report import PlayerReport, week_report
 from .sleeper import Sleeper
 
 TZ = ZoneInfo("America/Mexico_City")
@@ -52,20 +52,26 @@ def day_lines(reports: List[PlayerReport], date: str) -> List[str]:
             continue
         who = f"{r.name}{'' if r.starter else ' (bench)'}"
         if r.lock and r.lock.date < date and r.lock_status != MISSED:
-            lines.append(f"  -      {who}: locked on {r.lock.date} ({r.lock.score:.1f})")
+            lines.append(f"  -       {who}: locked on {r.lock.date} ({r.lock.score:.1f})")
         elif not r.lock and r.sleeper_locked_on and r.sleeper_locked_on < date:
-            lines.append(f"  -      {who}: Sleeper shows a lock on {r.sleeper_locked_on}")
+            lines.append(f"  -       {who}: Sleeper shows a lock on {r.sleeper_locked_on}")
         elif g.call == "-":
-            first = next(x for x in r.games if x.call in (LOCK, BENCH))
-            lines.append(f"  -      {who}: engine said LOCK on {first.date} ({first.score:.1f})")
+            first = next(x for x in r.games if x.call == LOCK)
+            lines.append(f"  -       {who}: engine said LOCK on {first.date} ({first.score:.1f})")
         elif g.score is None:
-            lines.append(f"  -      {who}: no score yet ({g.call})")
+            lines.append(f"  -       {who}: no score yet ({g.call})")
+        elif g.call == BENCHED:
+            nxt = next((x for x in r.games if x.date > date and x.expected), None)
+            tip = (f"start him for {nxt.date} (threshold {nxt.threshold:.1f})" if nxt
+                   else "no games left this week")
+            lines.append(f"  {BENCHED:<7} {who}: {g.score:.1f} on the bench, can't be locked"
+                         f" · {tip}")
         else:
             left = sum(1 for x in r.games if x.date > date and x.expected)
-            cmp = ">=" if g.call in (LOCK, BENCH) else "<"
-            lines.append(f"  {g.call:<6} {who}: {g.score:.1f} {cmp} {g.threshold:.1f}"
+            cmp = ">=" if g.call == LOCK else "<"
+            lines.append(f"  {g.call:<7} {who}: {g.score:.1f} {cmp} {g.threshold:.1f}"
                          f" · {left} game{'s' if left != 1 else ''} left")
-    order = {LOCK: 0, BENCH: 1, "PASS": 2}
+    order = {LOCK: 0, "PASS": 1, BENCHED: 2}
     return sorted(lines, key=lambda l: order.get(l.split()[0], 3))
 
 
@@ -88,7 +94,7 @@ def new_calls(reports: List[PlayerReport], date: str) -> List[dict]:
     calls = []
     for r in reports:
         g = next((g for g in r.games if g.date == date), None)
-        if g is None or g.call not in (LOCK, BENCH) or (r.lock and r.lock.date == date):
+        if g is None or g.call != LOCK or (r.lock and r.lock.date == date):
             continue
         if not r.lock and r.sleeper_locked_on and r.sleeper_locked_on < date:
             continue  # Sleeper already shows an earlier lock
@@ -96,7 +102,7 @@ def new_calls(reports: List[PlayerReport], date: str) -> List[dict]:
             continue  # his last game of the week counts anyway: nothing to do
         calls.append({
             "pid": r.pid, "name": r.name, "date": date, "score": g.score,
-            "threshold": round(g.threshold, 1), "bench": g.call == BENCH,
+            "threshold": round(g.threshold, 1), "bench": False,  # bench games are never locked (BENCHED)
             "marker": lock_marker(r.pid, date, g.score),
         })
     return calls
@@ -108,7 +114,7 @@ def main(argv=None) -> int:
     ap.add_argument("--user", required=True)
     ap.add_argument("--date", help="YYYY-MM-DD (game date); default: last finished day")
     ap.add_argument("--locks", type=Path, help="file with remembered lock marker lines")
-    ap.add_argument("--json-out", type=Path, help="write new LOCK/BENCH calls here")
+    ap.add_argument("--json-out", type=Path, help="write new LOCK calls here")
     a = ap.parse_args(argv)
 
     known: Dict[str, KnownLock] = parse_locks(a.locks.read_text()) if a.locks else {}
